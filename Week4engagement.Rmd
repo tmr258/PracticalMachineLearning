@@ -1,0 +1,142 @@
+---
+title: "Prediction models for barbell lift exercise performance"
+author: "T.Roelofs"
+date: "25 May 2017"
+output: pdf_document
+fontsize: 9pt
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.height = 2, fig.width = 7)
+```
+##Introduction
+
+
+
+##Synopsis
+
+<conclusion>
+
+##Data Processing
+
+###Data loading
+
+```{r Download file and read data}
+knitr::opts_chunk$set(verbose = FALSE, message = FALSE, warning = FALSE)
+
+library(ggplot2)
+library(caret)
+
+setwd("~/Datasciencecoursera/Module 8 Practical Machine Learning/Week 4 assignment")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "trainingdata")
+training <- read.csv("trainingdata")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "testdata")
+testing <- read.csv("testdata")
+
+```
+Now we check the quality of the training data set. On casual manual inspection, it was visible that a considerable number of data fields was either NA, #DIV/0! or empty. The columns that contain too much of these odd values need to be removed to optimize the model fit. So let's check the values and do some more preprocessing by removing the covariates of the remaining set that correlate. The first 7 columns seem to be metadata on the measurements (person, timestamps etc) which we will leave out.
+
+````{r Code chunk to remove low quality covariates }
+
+check <- data.frame(nrow=1, ncol=160)
+quality <- data.frame(nrow=1, ncol=160)
+for (i in 1:160){ 
+  check[i] <- sum(is.na(training[,i])| 
+                        training[,i]=="#DIV/0!" |
+                        training[,i]=="")
+  quality[i] <- (1-(check[i])/length(training[,i]))
+  } 
+# Only keep the covariates that have no more than 2% inadequate values  
+preproc_training <- training[,quality > 0.98]
+# Remove first 7 columns
+preproc_training <- preproc_training[,-(1:7)]
+
+``` 
+
+```{r Code chuck to remove correlating covariates}
+nearZeroVariates <- nearZeroVar(preproc_training, saveMetrics = TRUE)
+print(nearZeroVariates)
+
+``` 
+It turns out that no covariates are (highly) correlated with another covariate. The preprocessed training set therefore stays as it is. We can do the model fit tp predict the variable Classe with the 52 identified covariates.
+
+We can check for an even distribution of the classes over the training set, a skewed distribution over the classes A-E may be a problem while fitting. We therefore do this final check:
+
+```{ r Check on distribution of classe over the measurements}
+table(preproc_training$classe)
+
+```
+Conclusion of the check is that there seems to be a quite healthy spread in measurements. A fair number of correct exercises (Classe A) and an about equal number of measurements over Classes B-E. We can proceed.
+
+# Splitting into a training and validation set
+
+To get an estimate of the Out of Sample error we need to split the training set into a training set and a validation set. My choice is a 70-30 split of the training set in a set for training and validation, while using random sampling without replacement. In the training set 20% of the total number of data points is used for testing. 
+
+````{r Generation of the training and validation set}
+set.seed(5555)
+inTrain <- createDataPartition(y = preproc_training$classe, p = .7, list = FALSE)
+train_and_test_set <- preproc_training[inTrain,]
+val_set <- preproc_training[-inTrain,]
+
+index_split_train_test <- createDataPartition(train_and_test_set$classe, p = 0.7143, list = FALSE)
+train_set <- train_and_test_set[index_split_train_test,]
+test_set <- train_and_test_set[-index_split_train_test,]
+```
+
+As described by the authors in http://groupware.les.inf.puc-rio.br/public/papers/2013.Velloso.QAR-WLE.pdf a prediction accuracy of 98% is 'up to par', so this is the aim for the first model fit. 
+
+
+# Model Fit with Linear Discriminant Analysis
+
+```{r Model fit with }
+model_fit_lda <- train(classe ~ . , data= train_set, method="lda")
+model_fit_lda
+
+```
+
+Generalized Boosted Methods Regression Models
+
+# Model Fit with GBM method
+
+```{r Model fit with }
+knitr::opts_chunk$set(verbose = FALSE, message = FALSE, warning = FALSE)
+model_fit_gbm <- train(classe ~ . , data= train_set, method="gbm", verbose=FALSE)
+model_fit_gbm
+
+
+```
+
+# Try to gain accuracy by combining the models
+
+```{r Combining models}
+prediction_lda <- predict(model_fit_lda, test_set)
+prediction_gbm <- predict(model_fit_gbm, test_set)
+prediction_DF <- data.frame(prediction_lda, prediction_gbm, classe = test_set$classe)
+combined_model <- train(classe ~. , method="rf", data=prediction_DF)
+combined_predictions <- predict(combined_model, prediction_DF)
+confusionMatrix(combined_predictions, prediction_DF$classe)
+
+# Repeat for the validation set
+prediction_ldaVal <- predict(model_fit_lda, val_set)
+prediction_gbmVal <- predict(model_fit_gbm, val_set)
+prediction_VDF <- data.frame(pred1=prediction_ldaVal, pred2=prediction_gbmVal)
+combPredVal <- predict(combined_model, newdata=prediction_VDF)
+
+```
+
+
+# Use the models to generate a GBM prediction for the Test set
+
+````{r Prediction on the Test set}
+predTestgbm <- predict(model_fit_gbm, newdata = test_set)
+confusionMatrix(predTestgbm, test_set$classe)
+
+```
+
+# Use the models to generate an LDA prediction for the Validation set
+
+````{r Prediction on the Test set}
+predTestlda <- predict(model_fit_lda, newdata = test_set)
+confusionMatrix(predTestlda, test_set$classe)
+
+```
+
